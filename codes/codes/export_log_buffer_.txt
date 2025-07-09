@@ -1,0 +1,1 @@
+catalog;schema;table;column;collumn_dtype;creation_date;creation_time;table_description;user;file_fetched;notebook_link
