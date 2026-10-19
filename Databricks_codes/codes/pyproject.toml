@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dataeng-codes"
-# Aumente a versão a cada mudança no código (1.0.1, 1.1.0, ...):
-# o ambiente serverless faz cache das dependências e só reinstala quando a versão muda.
+# Versão base. O build (GitHub Actions ou build_wheel.py) acrescenta ".post<timestamp>" sozinho,
+# então o cache do serverless sempre reinstala. Mude aqui só para marcar releases (1.1.0, 2.0.0...).
 version = "1.0.0"
 description = "BaseDataProcessorSpark e DataDictionaryBuilder: ingestão, limpeza e governança de dados no Databricks"
 authors = [{ name = "André Luiz Souza Santos", email = "andrezluz19@gmail.com" }]

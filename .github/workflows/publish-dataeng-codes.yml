@@ -1,0 +1,114 @@
+# Caminho no repositório: .github/workflows/publish-dataeng-codes.yml
+#
+# A cada push (main ou Databricks_codes) que altere a biblioteca:
+#   1. gera uma versão única (<versão do pyproject>.post<timestamp>) — sem bump manual;
+#   2. faz o build do wheel e confere se os dois módulos estão dentro dele;
+#   3. envia o wheel ao Volume e reescreve o YAML do base environment (sempre no mesmo caminho);
+#   4. dispara o refresh do base environment e espera ele ficar pronto.
+#
+# Configuração (Settings > Secrets and variables > Actions):
+#   Secrets:   DATABRICKS_HOST  (ex.: https://dbc-xxxx.cloud.databricks.com)
+#              DATABRICKS_TOKEN (PAT de um usuário admin do workspace)
+#   Variables: DATABRICKS_VOLUME_LIBS  (ex.: /Volumes/workspace/default/libs)
+#              DATABRICKS_BASE_ENV_ID  (ex.: dataeng-codes — deixe vazia até criar o base environment)
+#              DATABRICKS_ENV_VERSION  (opcional; padrão '5')
+
+name: Publicar dataeng-codes no Databricks
+
+on:
+  push:
+    branches: [main, Databricks_codes]
+    paths:
+      - "Databricks_codes/codes/*.py"
+      - "Databricks_codes/codes/pyproject.toml"
+      - ".github/workflows/publish-dataeng-codes.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: publish-dataeng-codes
+  cancel-in-progress: false
+
+env:
+  PKG_DIR: Databricks_codes/codes
+  VOLUME_LIBS: ${{ vars.DATABRICKS_VOLUME_LIBS }}
+  BASE_ENV_ID: ${{ vars.DATABRICKS_BASE_ENV_ID }}
+  ENV_VERSION: ${{ vars.DATABRICKS_ENV_VERSION || '5' }}
+  DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+  DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: databricks/setup-cli@main
+
+      - name: Validar configuração
+        run: |
+          test -n "$DATABRICKS_HOST"  || { echo "::error::Secret DATABRICKS_HOST não definido"; exit 1; }
+          test -n "$DATABRICKS_TOKEN" || { echo "::error::Secret DATABRICKS_TOKEN não definido"; exit 1; }
+          case "$VOLUME_LIBS" in
+            /Volumes/*) ;;
+            *) echo "::error::Variável DATABRICKS_VOLUME_LIBS deve começar com /Volumes/"; exit 1 ;;
+          esac
+
+      - name: Gerar versão única do build
+        working-directory: ${{ env.PKG_DIR }}
+        run: |
+          BASE=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          VERSION="${BASE}.post$(date -u +%Y%m%d%H%M%S)"
+          # Altera só a cópia do runner; nada é commitado
+          sed -i -E "s/^version = \"[^\"]*\"/version = \"${VERSION}\"/" pyproject.toml
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "Versão do build: ${VERSION}"
+
+      - name: Checar sintaxe e gerar o wheel
+        working-directory: ${{ env.PKG_DIR }}
+        run: |
+          python -m py_compile BaseDataProcessorSpark.py DataDictionaryBuilder.py
+          python -m pip install --quiet build
+          python -m build --wheel --outdir dist
+          WHEEL=$(ls dist/*.whl)
+          python -m zipfile -l "$WHEEL" | grep -q "BaseDataProcessorSpark.py" || { echo "::error::BaseDataProcessorSpark.py fora do wheel"; exit 1; }
+          python -m zipfile -l "$WHEEL" | grep -q "DataDictionaryBuilder.py"  || { echo "::error::DataDictionaryBuilder.py fora do wheel"; exit 1; }
+          echo "WHEEL=${PWD}/${WHEEL}" >> "$GITHUB_ENV"
+
+      - name: Enviar wheel e YAML do base environment para o Volume
+        run: |
+          NOME=$(basename "$WHEEL")
+          databricks fs cp "$WHEEL" "dbfs:${VOLUME_LIBS}/${NOME}" --overwrite
+          printf "environment_version: '%s'\ndependencies:\n  - %s/%s\n" "$ENV_VERSION" "$VOLUME_LIBS" "$NOME" > dataeng_base_env.yml
+          cat dataeng_base_env.yml
+          databricks fs cp dataeng_base_env.yml "dbfs:${VOLUME_LIBS}/dataeng_base_env.yml" --overwrite
+          echo "### Publicado \`${NOME}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Atualizar o base environment
+        if: ${{ env.BASE_ENV_ID != '' }}
+        run: |
+          OP=$(databricks api post "/api/environments/v1/workspace-base-environments/${BASE_ENV_ID}/refresh" --json '{}')
+          echo "$OP"
+          NOME_OP=$(echo "$OP" | jq -r '.name // empty')
+          if [ -z "$NOME_OP" ]; then
+            echo "::warning::Refresh disparado, mas sem operação para acompanhar."
+            exit 0
+          fi
+          for i in $(seq 1 60); do
+            ST=$(databricks api get "/api/environments/v1/${NOME_OP}")
+            if [ "$(echo "$ST" | jq -r '.done // false')" = "true" ]; then
+              ERRO=$(echo "$ST" | jq -r '.error.message // .error.error_code // empty')
+              if [ -n "$ERRO" ]; then
+                echo "$ST"
+                echo "::error::Falha ao materializar o base environment: ${ERRO}"
+                exit 1
+              fi
+              echo "Base environment pronto com ${VERSION}."
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::warning::Refresh ainda em andamento após 15 min; acompanhe em Settings > Compute > Base environments."

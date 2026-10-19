@@ -5,6 +5,17 @@ This repository contains a comprehensive toolkit for data engineering on Spark, 
   * **`BaseDataProcessorSpark`**: A powerful, general-purpose class for data ingestion, processing, transformation, and performance optimization.
   * **`DataDictionaryBuilder`**: A specialized class for automating data governance tasks, including the creation, maintenance, and AI-powered enrichment of a data dictionary.
 
+### 📦 Installation & usage
+
+Every push publishes a new wheel (`dataeng-codes`) to a Unity Catalog Volume and refreshes a workspace base environment, so any serverless notebook only needs:
+
+```python
+from BaseDataProcessorSpark import BaseDataProcessorSpark
+from DataDictionaryBuilder import DataDictionaryBuilder
+```
+
+See [`DEPLOY.md`](DEPLOY.md) for the one-time setup and [`Class_usage_example.ipynb`](Class_usage_example.ipynb) for an end-to-end example.
+
 -----
 
 ## ✅ `BaseDataProcessorSpark`: The Data Processing Engine
