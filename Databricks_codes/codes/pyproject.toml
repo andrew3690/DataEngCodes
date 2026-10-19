@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dataeng-codes"
+# Aumente a versão a cada mudança no código (1.0.1, 1.1.0, ...):
+# o ambiente serverless faz cache das dependências e só reinstala quando a versão muda.
+version = "1.0.0"
+description = "BaseDataProcessorSpark e DataDictionaryBuilder: ingestão, limpeza e governança de dados no Databricks"
+authors = [{ name = "André Luiz Souza Santos", email = "andrezluz19@gmail.com" }]
+requires-python = ">=3.10"
+# pyspark e databricks-sdk já vêm no runtime do Databricks: NÃO declare aqui (instalar pyspark derruba a sessão)
+dependencies = ["pandas", "openpyxl"]
+
+[tool.setuptools]
+# Módulos de topo: permite "from BaseDataProcessorSpark import BaseDataProcessorSpark"
+py-modules = ["BaseDataProcessorSpark", "DataDictionaryBuilder"]
